@@ -1,17 +1,45 @@
-import ast
-
-app_code = '''import streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import sqlite3
 from datetime import datetime
-import json
+
+# ---------------------------------------------------------
+# 0. HÀM TƯƠNG THÍCH BẢO VỆ LỖI STREAMLIT (SAFE HELPERS)
+# ---------------------------------------------------------
+def safe_rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+def safe_toast(msg, icon="🐶"):
+    if hasattr(st, "toast"):
+        st.toast(msg, icon=icon)
+    else:
+        st.success(f"{icon} {msg}")
+
+def safe_index(option_list, val, default=0):
+    try:
+        return option_list.index(val)
+    except (ValueError, KeyError, TypeError):
+        return default
+
+def safe_barchart(df, x_col, y_col):
+    try:
+        st.bar_chart(df, x=x_col, y=y_col)
+    except Exception:
+        if not df.empty and x_col in df.columns and y_col in df.columns:
+            chart_data = df.set_index(x_col)[[y_col]]
+            st.bar_chart(chart_data)
 
 # ---------------------------------------------------------
 # 1. KHỞI TẠO CƠ SỞ DỮ LIỆU SQLITE
 # ---------------------------------------------------------
+DB_FILE = "dogemnet.db"
+
 def init_db():
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS profile (
@@ -55,7 +83,6 @@ def init_db():
         )
     """)
     
-    # Kiểm tra nếu chưa có hồ sơ thì tạo mặc định
     c.execute("SELECT COUNT(*) FROM profile")
     if c.fetchone()[0] == 0:
         c.execute("""
@@ -63,7 +90,6 @@ def init_db():
             VALUES (1, 20000000, 26, 'Nam', 'Độc thân', 'Đang ở trọ / Đi thuê', 0, 0, 30000000, 'Cân bằng')
         """)
     
-    # Thêm dữ liệu mẫu nếu bảng thu chi trống
     c.execute("SELECT COUNT(*) FROM expenses")
     if c.fetchone()[0] == 0:
         sample_expenses = [
@@ -74,7 +100,6 @@ def init_db():
         ]
         c.executemany("INSERT INTO expenses (date, category, description, amount) VALUES (?, ?, ?, ?)", sample_expenses)
         
-    # Thêm dữ liệu mẫu hũ tiết kiệm nếu trống
     c.execute("SELECT COUNT(*) FROM savings_goals")
     if c.fetchone()[0] == 0:
         sample_goals = [
@@ -89,15 +114,25 @@ def init_db():
 
 init_db()
 
-# Các hàm thao tác DB
 def load_profile():
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     df = pd.read_sql("SELECT * FROM profile WHERE id=1", conn)
     conn.close()
-    return df.iloc[0].to_dict()
+    default_prof = {
+        'income': 20000000, 'age': 26, 'gender': 'Nam', 'marital_status': 'Độc thân',
+        'housing_status': 'Đang ở trọ / Đi thuê', 'dependents': 0, 'monthly_debt': 0,
+        'current_savings': 30000000, 'risk_appetite': 'Cân bằng'
+    }
+    if df.empty:
+        return default_prof
+    row = df.iloc[0].to_dict()
+    for k, v in default_prof.items():
+        if k not in row or pd.isna(row[k]):
+            row[k] = v
+    return row
 
 def save_profile(data):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("""
         UPDATE profile SET income=?, age=?, gender=?, marital_status=?, housing_status=?, 
@@ -108,53 +143,53 @@ def save_profile(data):
     conn.close()
 
 def load_expenses():
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     df = pd.read_sql("SELECT * FROM expenses ORDER BY id DESC", conn)
     conn.close()
     return df
 
 def add_expense(date, category, description, amount):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("INSERT INTO expenses (date, category, description, amount) VALUES (?, ?, ?, ?)", (date, category, description, amount))
     conn.commit()
     conn.close()
 
 def load_goals():
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     df = pd.read_sql("SELECT * FROM savings_goals", conn)
     conn.close()
     return df
 
 def add_goal(name, target, current, target_date):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("INSERT INTO savings_goals (name, target, current, target_date) VALUES (?, ?, ?, ?)", (name, target, current, target_date))
     conn.commit()
     conn.close()
 
 def update_goal_savings(goal_id, add_amount):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("UPDATE savings_goals SET current = current + ? WHERE id = ?", (add_amount, goal_id))
     conn.commit()
     conn.close()
 
 def load_debts():
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     df = pd.read_sql("SELECT * FROM debts", conn)
     conn.close()
     return df
 
 def add_debt(name, amount, rate, min_pay):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("INSERT INTO debts (name, amount, interest_rate, min_pay) VALUES (?, ?, ?, ?)", (name, amount, rate, min_pay))
     conn.commit()
     conn.close()
 
 def delete_debt(debt_id):
-    conn = sqlite3.connect("dogemnet.db")
+    conn = sqlite3.connect(DB_FILE, timeout=15)
     c = conn.cursor()
     c.execute("DELETE FROM debts WHERE id = ?", (debt_id,))
     conn.commit()
@@ -170,7 +205,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS siêu sặc sỡ, trẻ trung & sinh động
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
@@ -292,23 +326,27 @@ st.markdown("""
 # ---------------------------------------------------------
 user_prof = load_profile()
 
+GENDER_OPTIONS = ["Nam", "Nữ", "Khác"]
+MARITAL_OPTIONS = ["Độc thân", "Đã kết hôn (Chưa có con)", "Đã kết hôn (Có con nhỏ)", "Đã kết hôn (Con đã lớn)"]
+HOUSING_OPTIONS = ["Đang ở trọ / Đi thuê", "Ở cùng bố mẹ", "Đang trả góp mua nhà", "Sở hữu nhà riêng"]
+RISK_OPTIONS = ["Rất an toàn", "An toàn", "Cân bằng", "Tăng trưởng", "Rất mạo hiểm"]
+
 with st.sidebar:
     st.markdown("<h1 style='text-align: center; color: #D97706; margin-bottom:0;'>🐶 DOGEMNET</h1>", unsafe_allow_html=True)
     st.caption("<p style='text-align:center;'>🚀 Quản Lý Tài Chính AI & Game Hóa Số 1</p>", unsafe_allow_html=True)
     st.markdown("---")
     
     st.subheader("⚙️ Hồ Sơ Người Dùng (Tự Động Lưu)")
-    income = st.number_input("💵 Thu nhập hàng tháng (VNĐ):", min_value=1000000, value=int(user_prof['income']), step=1000000, format="%d")
-    age = st.slider("🎂 Độ tuổi:", min_value=18, max_value=70, value=int(user_prof['age']))
-    gender = st.selectbox("🚻 Giới tính:", ["Nam", "Nữ", "Khác"], index=["Nam", "Nữ", "Khác"].index(user_prof['gender']))
-    marital_status = st.selectbox("💍 Tình trạng hôn nhân:", ["Độc thân", "Đã kết hôn (Chưa có con)", "Đã kết hôn (Có con nhỏ)", "Đã kết hôn (Con đã lớn)"], index=["Độc thân", "Đã kết hôn (Chưa có con)", "Đã kết hôn (Có con nhỏ)", "Đã kết hôn (Con đã lớn)"].index(user_prof['marital_status']))
-    housing_status = st.selectbox("🏠 Tình trạng nhà ở:", ["Đang ở trọ / Đi thuê", "Ở cùng bố mẹ", "Đang trả góp mua nhà", "Sở hữu nhà riêng"], index=["Đang ở trọ / Đi thuê", "Ở cùng bố mẹ", "Đang trả góp mua nhà", "Sở hữu nhà riêng"].index(user_prof['housing_status']))
-    dependents = st.number_input("👨‍👩‍👧‍👦 Số người phụ thuộc:", min_value=0, max_value=10, value=int(user_prof['dependents']))
-    monthly_debt = st.number_input("💳 Khoản nợ/trả góp tháng (VNĐ):", min_value=0, value=int(user_prof['monthly_debt']), step=500000, format="%d")
-    current_savings = st.number_input("🏦 Tiết kiệm hiện có (VNĐ):", min_value=0, value=int(user_prof['current_savings']), step=5000000, format="%d")
-    risk_appetite = st.select_slider("🎯 Khẩu vị rủi ro:", options=["Rất an toàn", "An toàn", "Cân bằng", "Tăng trưởng", "Rất mạo hiểm"], value=user_prof['risk_appetite'])
+    income = st.number_input("💵 Thu nhập hàng tháng (VNĐ):", min_value=1000000, value=int(user_prof.get('income', 20000000)), step=1000000, format="%d")
+    age = st.slider("🎂 Độ tuổi:", min_value=18, max_value=70, value=int(user_prof.get('age', 26)))
+    gender = st.selectbox("🚻 Giới tính:", GENDER_OPTIONS, index=safe_index(GENDER_OPTIONS, user_prof.get('gender', 'Nam')))
+    marital_status = st.selectbox("💍 Tình trạng hôn nhân:", MARITAL_OPTIONS, index=safe_index(MARITAL_OPTIONS, user_prof.get('marital_status', 'Độc thân')))
+    housing_status = st.selectbox("🏠 Tình trạng nhà ở:", HOUSING_OPTIONS, index=safe_index(HOUSING_OPTIONS, user_prof.get('housing_status', 'Đang ở trọ / Đi thuê')))
+    dependents = st.number_input("👨‍👩‍👧‍👦 Số người phụ thuộc:", min_value=0, max_value=10, value=int(user_prof.get('dependents', 0)))
+    monthly_debt = st.number_input("💳 Khoản nợ/trả góp tháng (VNĐ):", min_value=0, value=int(user_prof.get('monthly_debt', 0)), step=500000, format="%d")
+    current_savings = st.number_input("🏦 Tiết kiệm hiện có (VNĐ):", min_value=0, value=int(user_prof.get('current_savings', 30000000)), step=5000000, format="%d")
+    risk_appetite = st.select_slider("🎯 Khẩu vị rủi ro:", options=RISK_OPTIONS, value=user_prof.get('risk_appetite', 'Cân bằng'))
     
-    # Cập nhật DB khi người dùng thay đổi dữ liệu sidebar
     updated_data = {
         'income': income, 'age': age, 'gender': gender, 'marital_status': marital_status,
         'housing_status': housing_status, 'dependents': dependents, 'monthly_debt': monthly_debt,
@@ -339,9 +377,8 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# TÍNH TOÁN TRẠNG THÁI "NUÔI DOGE TỐT SỐ" (GAMIFICATION)
 df_exp_all = load_expenses()
-total_spent_now = df_exp_all["amount"].sum() if not df_exp_all.empty else 0
+total_spent_now = df_exp_all["amount"].sum() if (not df_exp_all.empty and "amount" in df_exp_all.columns) else 0
 spent_ratio = total_spent_now / income if income > 0 else 0
 
 if spent_ratio <= 0.50:
@@ -421,7 +458,7 @@ if selected_menu == "📊 Phân Bổ Ngân Sách (50/30/20 & 6 Hũ)":
         "Hạng mục": ["Thiết yếu (Needs)", "Sở thích (Wants)", "Tích lũy & Đầu tư (Savings)"],
         "Số tiền": [needs_val, wants_val, savings_val]
     })
-    st.bar_chart(df_chart_50, x="Hạng mục", y="Số tiền", color="#F59E0B")
+    safe_barchart(df_chart_50, "Hạng mục", "Số tiền")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='card-vibrant-purple'>", unsafe_allow_html=True)
@@ -462,8 +499,8 @@ elif selected_menu == "🏺 Hũ Tiết Kiệm Mục Tiêu (Goal Savings)":
         if st.button("🚀 Khởi Tạo Hũ Tiết Kiệm", type="primary", use_container_width=True):
             if g_name:
                 add_goal(g_name, g_target, g_current, g_date.strftime("%Y-%m-%d"))
-                st.toast(f"Đã tạo hũ '{g_name}' thành công! 🏺", icon="🎉")
-                st.rerun()
+                safe_toast(f"Đã tạo hũ '{g_name}' thành công! 🏺", icon="🎉")
+                safe_rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_g2:
@@ -495,14 +532,14 @@ elif selected_menu == "🏺 Hũ Tiết Kiệm Mục Tiêu (Goal Savings)":
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("💵 Tích Lũy", key=f"btn_dep_{g_id}"):
                         update_goal_savings(g_id, dep_amount)
-                        st.toast(f"Đã nạp +{dep_amount:,.0f}đ vào hũ {row['name']}!", icon="✅")
-                        st.rerun()
+                        safe_toast(f"Đã nạp +{dep_amount:,.0f}đ vào hũ {row['name']}!", icon="✅")
+                        safe_rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================================================
 # CHỨC NĂNG 3: MÔ PHỎNG XÓA NỢ (SNOWBALL VS AVALANCHE)
 # =========================================================
-elif selected_menu == "💳 Mô Phỏng Xóa NỢ (Snowball vs Avalanche)":
+elif selected_menu == "💳 Mô Phỏng Xóa Nợ (Snowball vs Avalanche)":
     st.subheader("💳 Công Cụ Lập Kế Hoạch Xóa Nợ Thông Minh")
 
     col_d1, col_d2 = st.columns([1, 1.4])
@@ -518,8 +555,8 @@ elif selected_menu == "💳 Mô Phỏng Xóa NỢ (Snowball vs Avalanche)":
         if st.button("📌 Thêm Khoản Nợ", type="primary", use_container_width=True):
             if d_name:
                 add_debt(d_name, d_amount, d_rate, d_min_pay)
-                st.toast("Đã ghi nhận khoản nợ thành công!", icon="💳")
-                st.rerun()
+                safe_toast("Đã ghi nhận khoản nợ thành công!", icon="💳")
+                safe_rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_d2:
@@ -579,7 +616,6 @@ elif selected_menu == "🤖 AI Doge & Chatbot 'Hỏi Sếp Doge'":
         if user_query:
             st.session_state.chat_history.append({"role": "user", "msg": user_query})
             
-            # Logic AI Doge Phản Hồi Tự Động Dí Dỏm & Thông Minh
             q_lower = user_query.lower()
             if "iphone" in q_lower or "mua đồ" in q_lower or "trả góp" in q_lower:
                 max_phone = income * 0.8
@@ -595,7 +631,7 @@ elif selected_menu == "🤖 AI Doge & Chatbot 'Hỏi Sếp Doge'":
                 reply = f"Gâu gâu! Lời khuyên vàng của Doge cho bạn: Hãy luôn trích ngay **20% thu nhập ({income*0.2:,.0f}đ)** vào Hũ Tích Lũy ngay khi nhận lương, rồi mới tính chuyện tiêu phần còn lại!"
 
             st.session_state.chat_history.append({"role": "doge", "msg": reply})
-            st.rerun()
+            safe_rerun()
 
 # =========================================================
 # CHỨC NĂNG 5: DỰ PHÒNG & TỰ DO TÀI CHÍNH (FIRE)
@@ -660,8 +696,8 @@ else:
 
         if st.button("💾 Lưu Vào CSDL SQLite", type="primary", use_container_width=True):
             add_expense(e_date.strftime("%d/%m/%Y"), e_cat, e_desc if e_desc else "Chi tiêu", e_amt)
-            st.toast("Đã lưu chi tiêu vào CSDL SQLite vĩnh viễn! 🐶", icon="✅")
-            st.rerun()
+            safe_toast("Đã lưu chi tiêu vào CSDL SQLite vĩnh viễn! 🐶", icon="✅")
+            safe_rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_e2:
@@ -673,7 +709,6 @@ else:
             tot_exp = df_expenses_list["amount"].sum()
             st.metric("💸 Tổng chi tiêu thực tế đã ghi nhận", f"{tot_exp:,.0f} VNĐ")
 
-            # Xuất dữ liệu ra file CSV
             csv_exp = df_expenses_list.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 Tải Báo Cáo Tài Chính CSV (Excel)",
@@ -682,7 +717,3 @@ else:
                 mime="text/csv",
                 type="primary"
             )
-'''
-
-ast.parse(app_code)
-print("DOGEMNET Super App code AST verified successfully!")
